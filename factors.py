@@ -30,11 +30,17 @@ IVW (Growth ETF):
 DWA (Momentum ETF): Switched from MTUM cause the price history did not go back beyond 2013 however other ETF's could be used.
     Factors:
         VIX: 
-        Trading volume 
+        Trading volume: 
         Cross-sectional volatility: 
         Momentum factor return:
 
-SPX (Volitility ETF):
+USMV(Volitility ETF):
+    Factors:
+        Economic Unscertanty:
+        VIX:
+        Consumer Scentiment:
+
+SPX (Beta ETF):
     Factors:
         Economic Policy Unscertanty:
         VIX:
@@ -350,12 +356,11 @@ class FactorAnalysis:
 
         # 4) normalize weights so all rows sum to 1
         row_sums = raw.sum(axis=1).replace(0.0, np.nan)
-        weights = raw.div(row_sums, axis=0)  # now each row sums to 1 (where valid)
+        weights = raw.div(row_sums, axis=0)
         if cash_weight > 0.0:
             weights = weights * (1.0 - cash_weight)
             weights["CASH"] = cash_weight
 
-        # Optional safety: drop rows where we couldn't form weights
         weights = weights.dropna(how="any")
 
         return weights
