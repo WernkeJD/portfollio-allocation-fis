@@ -27,17 +27,27 @@ IVW (Growth ETF):
         Corporate Profits (EPS Growth Proxy): Positive Relationship
         Capex_ratio: Positve Relationship  
 
-MTUM (Momentum ETF):
+DWA (Momentum ETF): Switched from MTUM cause the price history did not go back beyond 2013 however other ETF's could be used.
     Factors:
-        VIX, Trading volume, Cross-sectional volatility, Momentum factor return
+        VIX: 
+        Trading volume 
+        Cross-sectional volatility: 
+        Momentum factor return:
 
 SPX (Volitility ETF):
     Factors:
-        Citi ESI, VIX, Consumer Sentiment, M2 Growth, NFP changes
+        Economic Policy Unscertanty:
+        VIX:
+        Consumer Sentiment: 
+        M2 Growth:
+        NFP changes:
 
 VFLQ (Liquidity ETF):
     factors:
-        Fed Balance Sheet, Corporate Bond Spreads, Effective Fed Funds Rate, Bid-Ask Spread Index
+        Fed Balance Sheet: 
+        Corporate Bond Spreads: 
+        Effective Fed Funds Rate: 
+        Trading Volume:
 """
 
 class FactorAnalysis:
@@ -50,7 +60,9 @@ class FactorAnalysis:
         self.start_date = '2000-01-01'
         self.end_date = '2023-12-31'
 
+    #helpers
     def normalize(self, series: pd.Series):
+        "Takes in a pandas series, historical facotr data in this case, and normalizes each value to a decimal between 0 and 1"
         return series.rank(pct=True)
 
     def align_to_common_index(self, dfs: list[pd.DataFrame]):
@@ -79,7 +91,16 @@ class FactorAnalysis:
             return f"an error occured: {e}"
 
 
+    #Calculations
+    """
+    each calculate function uses a set of factors with some significant corelation to the
+    macro trend each etf tracks. they take in no values and return a dataframe that contains the normalized
+    macro factor information, a score for the index, and a reccomended allocation. All data is resampled monthly,
+    as such, each reccomendation allocation and score is also a reccomendation for the month.
 
+    For information on the factors used for each etf's calculation, see the top of this calass.
+
+    """
     def calculate_vym(self):
 
         data = {
@@ -111,15 +132,13 @@ class FactorAnalysis:
         return df
     
     def calculate_ivw(self):
-        # --- Monthly (ME) rates ---
         dgs10 = fred.get_series("DGS10", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()
         dgs2  = fred.get_series("DGS2", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()
         ff    = fred.get_series("FEDFUNDS", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()
-
         cpi   = fred.get_series("CPIAUCSL", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()
         infl_yoy = cpi.pct_change(12) * 100
 
-        # --- Quarterly → Monthly (ffill) proxies ---
+        # --- Quarterly -> Monthly (ffill) proxies ---
         # EPS proxy from BEA corporate profits (YoY)
         cp = fred.get_series("CP", observation_start = self.start_date, observation_end=self.end_date).resample("QE-DEC").last()
         eps_yoy_q = cp.pct_change(4) * 100
@@ -130,7 +149,6 @@ class FactorAnalysis:
         capex_ratio_q = (capex / gdp) * 100
         capex_ratio_m = capex_ratio_q.resample("ME").ffill()
 
-        # --- Assemble monthly DataFrame ---
         df = pd.concat({
             "yc_10y2y": dgs10 - dgs2,
             "real_ff":  ff - infl_yoy,
@@ -167,7 +185,6 @@ class FactorAnalysis:
         indpro_yoy = indpro.pct_change(12) * 100
         m2_yoy     = m2.pct_change(12) * 100
 
-        # --- Combine into DataFrame ---
         df = pd.concat({
             "vol": vix,
             "liq_yoy": m2_yoy,
@@ -196,18 +213,13 @@ class FactorAnalysis:
         return df
     
     def calculate_spx(self):
-        # --- Fetch monthly data ---
         esi   = fred.get_series("USEPUINDXD", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()       # economic surprise metric (for now)
         vix    = fred.get_series("VXOCLS", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()          # voitiity index
         con_sent = fred.get_series("UMCSENT", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()       # consumer sentiment metric
         m2 = fred.get_series("M2SL", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()                # measure of us money suppy
         nfp   = fred.get_series("PAYEMS", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()           # non farm payroll
 
-        # --- Transformations ---
-        # indpro_yoy = indpro.pct_change(12) * 100
-        # m2_yoy     = m2.pct_change(12) * 100
 
-        # --- Combine into DataFrame ---
         df = pd.concat({
             "esi": esi,
             "vix": vix,
@@ -243,9 +255,6 @@ class FactorAnalysis:
         m2 = fred.get_series("M2SL", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()                # measure of us money suppy
         nfp   = fred.get_series("PAYEMS", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()           # non farm payroll
 
-        # --- Transformations ---
-        # indpro_yoy = indpro.pct_change(12) * 100
-        # m2_yoy     = m2.pct_change(12) * 100
 
         # --- Combine into DataFrame ---
         df = pd.concat({
@@ -276,6 +285,7 @@ class FactorAnalysis:
         return df
     
 
+    #Final allocation
     def build_portfolio_weights(
         self,
         use_vym=True,
@@ -316,7 +326,8 @@ class FactorAnalysis:
             cols.append("SPX")
         if use_vflq:
             vflq = self.calculate_VFLQ()
-            dfs.append(vflq[["VFLQ_score"]])  # you'll define this later
+            dfs.append(vflq[["VFLQ_score"]])
+            cols.append("VFLQ")
 
         if not dfs:
             raise ValueError("No ETFs selected for portfolio weights.")
@@ -330,14 +341,14 @@ class FactorAnalysis:
             axis=1
         )
 
-        # 3) Turn scores into raw signals (clip 0–1, add floor)
+        # 3) Turn scores into raw signals
         signals = scores.clip(lower=0.0, upper=1.0)
         if floor > 0.0:
             raw = floor + signals
         else:
             raw = signals.copy()
 
-        # 4) Row-normalize to sum to (1 - cash_weight)
+        # 4) normalize weights so all rows sum to 1
         row_sums = raw.sum(axis=1).replace(0.0, np.nan)
         weights = raw.div(row_sums, axis=0)  # now each row sums to 1 (where valid)
         if cash_weight > 0.0:
@@ -356,7 +367,7 @@ if __name__ == "__main__":
     analysis = FactorAnalysis()
 
     if run:
-        # --- Step 1: Build the joint portfolio weights ---
+        # Step 1: Build the joint portfolio weights 
         print("\nBuilding joint portfolio weights for VYM, IVW, DWA, and SPX...")
         weights_df = analysis.build_portfolio_weights(
             use_vym=True,
@@ -364,11 +375,11 @@ if __name__ == "__main__":
             use_dwa=True,
             use_spx=True,
             use_vflq=False,
-            floor=0.05,       # give every ETF a small base weight
-            cash_weight=0.05   # keep 5% cash buffer
+            floor=0.05,       
+            cash_weight=0.00  
         )
 
-        # --- Step 2: Print summary ---
+        # Print summary
         print("\nSample of combined portfolio weights:")
         print(weights_df.head())
 
@@ -378,6 +389,6 @@ if __name__ == "__main__":
         print("\nDate range covered:", weights_df.index.min(), "→", weights_df.index.max())
         print("Columns included:", list(weights_df.columns))
 
-        # --- Optional Step 3: Export for backtesting ---
+        # Optional Step 3: Export for backtesting
         weights_df.to_csv("portfolio_weights.csv")
         print("\nSaved portfolio weights to 'portfolio_weights.csv'.")
