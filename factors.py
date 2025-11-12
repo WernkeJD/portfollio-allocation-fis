@@ -7,6 +7,8 @@ import yfinance as yf
 import json
 import requests
 
+from portfolio import Portfolio
+
 load_dotenv()
 fred_key = os.getenv("FRED-KEY")
 fred = Fred(api_key=fred_key)
@@ -27,7 +29,7 @@ IVW (Growth ETF):
         Corporate Profits (EPS Growth Proxy): Positive Relationship
         Capex_ratio: Positve Relationship  
 
-DWA (Momentum ETF): Switched from MTUM cause the price history did not go back beyond 2013 however other ETF's could be used.
+PDP (Momentum ETF): Switched from MTUM cause the price history did not go back beyond 2013 however other ETF's could be used.
     Factors:
         VIX: 
         Trading volume: 
@@ -36,24 +38,28 @@ DWA (Momentum ETF): Switched from MTUM cause the price history did not go back b
 
 USMV(Volitility ETF):
     Factors:
-        Economic Unscertanty:
-        VIX:
-        Consumer Scentiment:
+        Volatility (VIX): positive correlation
+        Real GDP growth: negative correlation
+        Consumer sentiment: negative correlation
+        Credit spreads are wide: positive correlation (higher spreads higher stress)
+        Unemployment: positive correlation
+
 
 SPX (Beta ETF):
     Factors:
-        Economic Policy Unscertanty:
-        VIX:
-        Consumer Sentiment: 
-        M2 Growth:
-        NFP changes:
+        Economic Policy Unscertanty: negative correlation
+        VIX: negative correlation more volitility eats into beta
+        Consumer Sentiment: Positive correlation more market confidence
+        M2 Growth: Positive correlation more money in supply is more for consumers to spend presumably
+        NFP changes:Positive correlation more job growth is more consumer spending good for beta
 
 VFLQ (Liquidity ETF):
     factors:
-        Fed Balance Sheet: 
-        Corporate Bond Spreads: 
-        Effective Fed Funds Rate: 
-        Trading Volume:
+        Effective Federal Funds Rate: negative correlation, lower funds rate means lower cost to borrow increases liquidity 
+        Corporate Bond Spreads: negative correlation, widening spreads mean that investors are demanding more for risk 
+        Retail trading volume: Positive correlation, more market participation benefits liquid stocks 
+        Money Supply: postive correlation: more money means more free capital to trade
+        Non farm payroll: positive correlation: Positive correlation, same reason as money supply
 """
 
 class FactorAnalysis:
@@ -257,7 +263,7 @@ class FactorAnalysis:
         # --- Fetch monthly data ---
         effr   = fred.get_series("DFF", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()             # effective fed funds rate
         corp_spread    = fred.get_series("AAA10Y", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()  # corporate bond spread
-        ba_spread = fred.get_series("", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()             # snp 500 trading volume
+        retail_trading_volume = fred.get_series("USASLRTTO01GYSAM", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()             # snp 500 trading volume
         m2 = fred.get_series("M2SL", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()                # measure of us money suppy
         nfp   = fred.get_series("PAYEMS", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()           # non farm payroll
 
@@ -266,28 +272,28 @@ class FactorAnalysis:
         df = pd.concat({
             "effr": effr,
             "corp_spread": corp_spread,
-            "con_sent": con_sent,
+            "retail_trading_volume": retail_trading_volume,
             "m2": m2,
             "nfp": nfp
         }, axis=1).dropna()
 
         df_norm = df.apply(self.normalize)
 
-        esi_score    = df_norm["esi"]
-        vix_score    = df_norm["vix"]
-        con_sent_score = df_norm["con_sent"]
+        effr_score    = 1- df_norm["effr"]
+        corp_spread_score    = 1 - df_norm["corp_spread"]
+        retail_trading_volume = df_norm["retail_trading_volume"]
         m2_score = df_norm["m2"]
         nfp_score   = df_norm["nfp"]
 
-        df["SPX_score"] = (
-            0.25 * esi_score +
-            0.25 * vix_score +
-            0.20 * con_sent_score +
+        df["VFLQ_score"] = (
+            0.25 * effr_score +
+            0.25 * corp_spread_score +
+            0.20 * retail_trading_volume +
             0.15 * m2_score +
             0.15 * nfp_score
         ).clip(0, 1)
 
-        df["SPX_allocation"] = 0.05 + 0.25 * df["SPX_score"]
+        df["VFLQ_allocation"] = 0.05 + 0.25 * df["VFLQ_score"]
         return df
     
 
@@ -297,8 +303,8 @@ class FactorAnalysis:
         use_vym=True,
         use_ivw=True,
         use_dwa=True,
-        use_spx=False,
-        use_vflq=False,
+        use_spx=True,
+        use_vflq=True,
         floor: float = 0.0,
         cash_weight: float = 0.0,
     ) -> pd.DataFrame:
@@ -370,16 +376,17 @@ class FactorAnalysis:
 if __name__ == "__main__":
     run = True
     analysis = FactorAnalysis()
+    port = Portfolio()
 
     if run:
         # Step 1: Build the joint portfolio weights 
-        print("\nBuilding joint portfolio weights for VYM, IVW, DWA, and SPX...")
+        print("\nBuilding joint portfolio weights for VYM, IVW, DWA, VFLQ, and SPX...")
         weights_df = analysis.build_portfolio_weights(
             use_vym=True,
             use_ivw=True,
             use_dwa=True,
             use_spx=True,
-            use_vflq=False,
+            use_vflq=True,
             floor=0.05,       
             cash_weight=0.00  
         )
@@ -397,3 +404,6 @@ if __name__ == "__main__":
         # Optional Step 3: Export for backtesting
         weights_df.to_csv("portfolio_weights.csv")
         print("\nSaved portfolio weights to 'portfolio_weights.csv'.")
+
+
+        

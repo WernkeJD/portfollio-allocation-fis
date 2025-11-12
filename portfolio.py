@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-
+import json
 
 class Portfolio:
     def __init__(self, starting_value: float=1000000):
@@ -12,10 +12,48 @@ class Portfolio:
         self.start_date = "2007-04-30"
         self.end_date = "2021-07-31"
 
-    def get_price_data(self, tickers: list[str]) -> pd.DataFrame:        
+    def align_to_common_index(self, dfs: list[pd.DataFrame]):
+        """
+        Take a list of DataFrames and return:
+          (aligned_dfs, common_index)
+        where aligned_dfs are restricted to the intersection of all indices.
+        """
+
+        if not dfs:
+            return [], None
+
+
+        common_index = dfs[0].index
+        for df in dfs[1:]:
+            common_index = common_index.intersection(df.index)
+
+        aligned = [df.loc[common_index].copy() for df in dfs]
+        return aligned, common_index
+
+    def generate_sp5mv_df(self, filepath: str):
+        with open(file=filepath, mode='r') as file:
+            data = json.load(file)
+
+        prices = {}
+
+        for item in data["data"]:
+            price = item["attributes"]["close"]
+            date = item["attributes"]["as_of_date"]
+
+            prices[date] = price
+
+        
+        df = pd.DataFrame(data=prices.values(), index=prices.keys(), columns=["price"])
+        return df
+
+    def get_price_data(self, tickers: list[str], csv_output = False) -> pd.DataFrame:        
         """
         Download adjusted close prices for the given tickers between start and end.
         """
+
+        sp5mv = self.generate_sp5mv_df(filepath="sp5mv.json")
+        sp5mv.index = pd.to_datetime(sp5mv.index)
+
         data = yf.download(tickers, start=self.start_date, end=self.end_date)["Close"]
 
         #converts to df is only one ticker is provided since default return from pd is Series
@@ -25,7 +63,14 @@ class Portfolio:
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
 
-        return data 
+        aligned_df, common_index = self.align_to_common_index(dfs=[data, sp5mv])
+
+        aligned_df[0]["sp5mv"] = aligned_df[1]["price"]
+
+        if csv_output:
+            aligned_df[0].to_csv("aligned_price_data.csv")
+
+        return aligned_df, common_index
 
     def generate_starting_portfolio(self, prices_row: pd.Series, weights_row: pd.Series):
         """
@@ -48,7 +93,7 @@ class Portfolio:
         self.total_value = self.starting_value
 
 
-    def backtest(self, prices: pd.DataFrame, weights_df: pd.DataFrame, rebalance_freq: str = "M") -> pd.Series:
+    def backtest(self, prices: pd.DataFrame, weights_df: pd.DataFrame, rebalance_freq: str = "ME") -> pd.Series:
         """
         Backtest the portfolio over the given price history, rebalancing according to weights_df.
 
@@ -138,7 +183,21 @@ class Portfolio:
 if __name__ == "__main__":
 
     port = Portfolio()
+    json_data = port.generate_sp5mv_df("sp5mv.json")
+    print(json_data)
+    tickers, common_index = port.get_price_data(["VYM", "IVW", "PDP", "^SPX", "VFLQ", "USMV"], csv_output=True)
 
-    test = port.generate_starting_portfolio({"^GSPC": .25, "AMD": .75})
-    print(test)
+    print("tickers \n", tickers, "\n")
+    print(type(tickers))
+    print("index \n", common_index, "\n")
+    print(type(common_index))
+
+    # print("portfolio price data example\n")
+    # print("df head: ")
+    # print(tickers.head(), "\n")
+    # print("df tail: ")
+    # print(tickers.tail())
+
+    # test = port.generate_starting_portfolio({"^GSPC": .25, "AMD": .75})
+    # print(test)
 
