@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import json
 
+from factors import FactorAnalysis
+
 class Portfolio:
     def __init__(self, starting_value: float=1000000):
         self.starting_value = starting_value
@@ -65,7 +67,7 @@ class Portfolio:
 
         aligned_df, common_index = self.align_to_common_index(dfs=[data, sp5mv])
 
-        aligned_df[0]["sp5mv"] = aligned_df[1]["price"]
+        aligned_df[0]["SP5MV"] = aligned_df[1]["price"]
 
         if csv_output:
             aligned_df[0].to_csv("aligned_price_data.csv")
@@ -78,19 +80,29 @@ class Portfolio:
         compute initial share positions.
         """
 
-        weights = weights_row.fillna(0.0)
-        if weights.sum() > 0:
-            weights = weights / weights.sum()
+        # weights = weights_row.fillna(0.0)
+        # if weights.sum() > 0:
+        #     weights = weights / weights.sum()
 
-        else:
-            self.positions = {t: 0.0 for t in prices_row.index}
-            self.total_value = self.starting_value
-            return
+        # else:
+        #     self.positions = {t: 0.0 for t in prices_row.index}
+        #     self.total_value = self.starting_value
+        #     return
         
-        dollar_alloc = self.starting_value * weights
-        shares = dollar_alloc / prices_row
-        self.positions = shares.to_dict()
-        self.total_value = self.starting_value
+        # dollar_alloc = self.starting_value * weights
+        # shares = dollar_alloc / prices_row
+        # self.positions = shares.to_dict()
+        # self.total_value = self.starting_value
+
+        starting_port = {}
+        shares_owned = {}
+
+        for key, value in prices_row.items():
+            starting_port[key] = float(weights_row[key] * self.starting_value)
+            shares_owned[key] = float(starting_port[key] / prices_row[key])
+            
+
+        return starting_port, shares_owned
 
 
     def backtest(self, prices: pd.DataFrame, weights_df: pd.DataFrame, rebalance_freq: str = "ME") -> pd.Series:
@@ -183,14 +195,34 @@ class Portfolio:
 if __name__ == "__main__":
 
     port = Portfolio()
+    analysis = FactorAnalysis()
     json_data = port.generate_sp5mv_df("sp5mv.json")
     print(json_data)
-    tickers, common_index = port.get_price_data(["VYM", "IVW", "PDP", "^SPX", "VFLQ", "USMV"], csv_output=True)
+    tickers, common_index = port.get_price_data(["VYM", "IVW", "PDP", "^SPX", "VFLQ"], csv_output=True)
 
-    print("tickers \n", tickers, "\n")
-    print(type(tickers))
-    print("index \n", common_index, "\n")
-    print(type(common_index))
+    weights_df = analysis.build_portfolio_weights(
+            use_vym=True,
+            use_ivw=True,
+            use_pdp=True,
+            use_spx=True,
+            use_vflq=True,
+            use_sp5mv = True,
+            floor=0.05,       
+            cash_weight=0.00  
+        )
+
+
+    prices_row = tickers[0].iloc[0]
+    weights_row = weights_df.iloc[0]
+    print("prices row maybe? ", prices_row)
+    print("weights row maybe? ", weights_row)
+    
+    starting_port, shares =  port.generate_starting_portfolio(prices_row=prices_row, weights_row=weights_row)
+
+    print(starting_port)
+    print(shares)
+
+
 
     # print("portfolio price data example\n")
     # print("df head: ")
