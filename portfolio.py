@@ -70,9 +70,72 @@ class Portfolio:
         aligned_df[0]["SP5MV"] = aligned_df[1]["price"]
 
         if csv_output:
-            aligned_df[0].to_csv("aligned_price_data.csv")
+            aligned_df[0].to_csv("csvs/aligned_price_data.csv")
 
         return aligned_df, common_index
+    
+    def compute_portfolio_risk(
+        self,
+        backtest_df: pd.DataFrame,
+        alpha: float = 0.95,
+        window: int = 52,
+    ) -> pd.DataFrame:
+        """
+        Computes dollar-based AND percentage-based portfolio risk metrics.
+
+        Adds:
+            port_return          (pct)
+            drawdown_pct         (pct)
+            drawdown_dollar      (absolute $)
+            max_drawdown_pct     (pct)
+            max_drawdown_dollar  (absolute $)
+            var_pct              (pct VaR)
+            es_pct               (pct ES)
+            var_dollar           ($ VaR)
+            es_dollar            ($ ES)
+        """
+
+        df = backtest_df.copy()
+        df = df.sort_index()
+
+        df["port_value"] = pd.to_numeric(df["port_value"], errors="coerce")
+
+        # === Returns ===
+        df["port_return"] = df["port_value"].pct_change()
+
+        # === Drawdown (percentage) ===
+        running_peak = df["port_value"].cummax()
+        df["drawdown_pct"] = df["port_value"] / running_peak - 1.0
+        df["max_drawdown_pct"] = df["drawdown_pct"].cummin()
+
+        # === Drawdown (dollar) ===
+        df["drawdown_dollar"] = df["port_value"] - running_peak
+        df["max_drawdown_dollar"] = df["drawdown_dollar"].cummin()
+
+        # === Rolling VaR / ES (percentage form first) ===
+        roll = df["port_return"].rolling(window=window, min_periods=20)
+
+        # VaR as a % loss
+        df["var_pct"] = -roll.quantile(1.0 - alpha)
+
+        # ES helper
+        def _rolling_es(returns: np.ndarray, alpha_inner: float) -> float:
+            s = pd.Series(returns).dropna()
+            if len(s) == 0:
+                return np.nan
+            q = s.quantile(1.0 - alpha_inner)
+            tail = s[s <= q]
+            if len(tail) == 0:
+                return np.nan
+            return -tail.mean()
+
+        df["es_pct"] = roll.apply(lambda x: _rolling_es(x, alpha), raw=True)
+
+        # === Convert VaR/ES from pct → dollars ===
+        df["var_dollar"] = df["var_pct"] * df["port_value"]
+        df["es_dollar"] = df["es_pct"] * df["port_value"]
+
+        return df
 
     def generate_allocation(self, prices_row: pd.Series, weights_row: pd.Series):
         """
@@ -250,7 +313,15 @@ if __name__ == "__main__":
 
     portfolio_returns = port.backtest(prices = prices_df, weights_df = weights_df)
     print("portfolio returns \n", portfolio_returns)
-    analysis.output_data(portfolio_returns,"port_returns.csv")
+    analysis.output_data(portfolio_returns,"csvs/aligned_price_data.csv")
+
+    risk_df = port.compute_portfolio_risk(
+    portfolio_returns,
+    alpha=0.95,  # 95% VaR/ES
+    window=52    # e.g. 52 weeks or 52 periods
+    )
+
+    risk_df.to_csv("csvs/portfolio_risk_metrics.csv")
 
 
 
