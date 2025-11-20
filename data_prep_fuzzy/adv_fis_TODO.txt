@@ -1,0 +1,66 @@
+Mamdani FIS for factor based ETF Allocation
+
+This file will store a modular fuzzy logic framework for generating ETF allocation 
+recommendations based on macroeconomic indicators.  It mirrors the structure and outputs
+of the static model in factors.py, but uses a rule-based Mamdani fuzzy logic system.
+
+FIS Structure:
+    Investible Factors: Liquidity, Beta, Volatility, Momentum, Growth, Dividend Yield
+
+Layer 1 - Sentiment
+---Policy---
+Policy Inputs:
+    Effective Federal Funds Rate: High = Tight, Medium = Neutral, Low = Loose
+    Yield Curve Slope: Inverted = Tight, Flat = Neutral, Steep = Loose
+    M2 Growth: High = Tight, Medium = Neutral, Low = Loose
+
+Policy Output Sets: Tight, Neutral, Loose
+    Loose Policy = ++Momentum, ++Growth, ++Beta, --DividendYield 
+    Neutral Policy = Balanced Allocation
+    Tight Policy  = ++DividendYield, ++Liquidity, --Growth, -Momentum
+
+Supporting Research:
+https://www.jstor.org/stable/2117350 - Discusses Fed Funds Rate as an indicator of policy
+https://doi.org/10.1111/fima.12256 - Discusses Interest Rates (YCS) as an indicator of real economic output
+TODO, find more sources/reasoning for M2
+
+---Growth---
+Growth Inputs:
+    Real GDP Growth Rate: High = Strong, Medium = Stable, Low = Weak
+    Corporate Profits: High = Strong, Medium = Stable, Low = Weak
+    Industrial Production: High = High = Strong, Medium = Stable, Low = Weak
+    Private Nonresidential Fixed Investment: High = Strong, Medium = Stable, Low = Weak
+
+Growth Output Sets: Weak, Stable, Strong
+    Strong = ++Growth, ++Momentum, ++Beta, +Volatility
+    Stable = Balanced Allocation
+    Weak = +++DividendYield, ++Liquidity, --Volatility
+
+Supporting Research:
+https://www.jstor.org/stable/2352710 - Discusses Industrial Production and YCS as indicators of return
+TODO, find more sources for GDP GR, Corp Prof, and PNFI
+
+---Risk---
+Risk Inputs: 
+    VIX: High = Risk-Off, Medium = Cautious, Low = Calm
+    High-Yield Credit Spread: High = Risk-Off, Medium = Cautious, Low = Calm
+    Economic Policy Uncertainty Index: High = Risk-Off, Medium = Cautious, Low = Calm
+    Consumer Sentiment: High = Calm, Medium = Cautious, Low = Risk-Off
+
+Risk Output Sets: Calm, Cautious, Risk-Off
+    Calm = ++Growth, ++Momentum, ++Beta, +Volatility
+    Cautious = +DividendYield, -Volatility, +Liquidity, -Momentum
+    Risk-Off = ++DividendYield, --Volatility, ++Liquidity, --Momentum
+
+Supporting Research:
+https://pages.stern.nyu.edu/~dbackus/GE_asset_pricing/Bloom%20uncer%20shocks%20Ec%2009.pdf
+    Demonstrates that uncertainty has a significant impact on the market
+https://mfm.uchicago.edu/wp-content/uploads/2020/07/Gilchrist_Zakrajsek_Credit-Spreads-and-Business-Cycle-Fluctuations-UPDATED.pdf
+    Shows that credit spread predicts the business cycle
+
+---Liquidity---
+Liquidity Inputs:
+    Money Supply (M2): High = Loose, Medium = Neutral, Low = Tight
+    Federal Funds Rate: High = Tight, Medium = Neutral, Low = Loose
+    Credit Spreads:  High = Tight, Medium = Neutral, Low = Loose
+    Retail Trading Volume: 
