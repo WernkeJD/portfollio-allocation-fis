@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import json
 
+from factors import FactorAnalysis
+
 class Portfolio:
     def __init__(self, starting_value: float=1000000):
         self.starting_value = starting_value
@@ -65,132 +67,192 @@ class Portfolio:
 
         aligned_df, common_index = self.align_to_common_index(dfs=[data, sp5mv])
 
-        aligned_df[0]["sp5mv"] = aligned_df[1]["price"]
+        aligned_df[0]["SP5MV"] = aligned_df[1]["price"]
 
         if csv_output:
             aligned_df[0].to_csv("aligned_price_data.csv")
 
         return aligned_df, common_index
 
-    def generate_starting_portfolio(self, prices_row: pd.Series, weights_row: pd.Series):
+    def generate_allocation(self, prices_row: pd.Series, weights_row: pd.Series):
         """
         Given a first date, a row of prices, and a row of target weights,
         compute initial share positions.
         """
 
-        weights = weights_row.fillna(0.0)
-        if weights.sum() > 0:
-            weights = weights / weights.sum()
+        starting_port = {}
+        shares_owned = {}
 
-        else:
-            self.positions = {t: 0.0 for t in prices_row.index}
-            self.total_value = self.starting_value
-            return
+        for key, value in prices_row.items():
+            starting_port[key] = float(weights_row[key] * self.starting_value)
+            shares_owned[key] = float(starting_port[key] / prices_row[key])
+            
+
+        return starting_port, shares_owned
+
+
+    # def backtest(self, prices: pd.DataFrame, weights_df: pd.DataFrame, rebalance_freq: str = "ME") -> pd.Series:
+
+
+    #     backtest_data_init = pd.DataFrame(index=prices.index, columns=["port_allocation", "shares_owned", "snp_price", "snp_returns"])
         
-        dollar_alloc = self.starting_value * weights
-        shares = dollar_alloc / prices_row
-        self.positions = shares.to_dict()
-        self.total_value = self.starting_value
+    #     aligned_frames, common_index = self.align_to_common_index([weights_df, backtest_data_init])
+
+    #     backtest_data = aligned_frames[1]
+
+    #     for item in prices.index:
+    #         backtest_data.at[item,"snp_price"] = prices.loc[item]["^SPX"]
+    #         backtest_data.at[item,"snp_returns"] = ((self.starting_value / prices.loc[item]["^SPX"])) # this is so wrong but it's just placeholder data for now.
+    #         if item in weights_df.index:
+    #             allocation, shares_owned = self.generate_allocation(prices_row = prices.loc[item], weights_row =weights_df.loc[item]) 
+    #             backtest_data.at[item, "port_allocation"] = allocation
+    #             backtest_data.at[item, "shares_owned"] = shares_owned
 
 
-    def backtest(self, prices: pd.DataFrame, weights_df: pd.DataFrame, rebalance_freq: str = "ME") -> pd.Series:
+
+    #     return backtest_data
+    def backtest(self, prices: pd.DataFrame, weights_df: pd.DataFrame, rebalance_freq: str = "ME") -> pd.DataFrame:
         """
-        Backtest the portfolio over the given price history, rebalancing according to weights_df.
+        Backtest the factor-based portfolio.
 
-        prices: DataFrame of Adj Close prices (index: dates, columns: tickers)
-        weights_df: DataFrame of target weights (index: dates, columns: tickers)
-                    The index should be a subset of prices.index (e.g., month end).
-        rebalance_freq: not strictly used yet (weights_df already encodes rebalancing dates),
-                        but kept for future flexibility.
+        - Resamples prices to the rebalance frequency (default: month-end "ME").
+        - Aligns prices and weights on their common date index.
+        - Rebalances the portfolio at each rebalance date to target weights.
+        - Tracks SPX as a benchmark.
+
+        Returns a DataFrame indexed by date with:
+        - port_allocation: dict[ticker -> dollars]
+        - shares_owned:   dict[ticker -> shares]
+        - port_value:     float (total portfolio value)
+        - snp_price:      float (^SPX price)
+        - snp_value:      float (value of SPX benchmark)
+        - snp_return:     float (cumulative return of SPX vs starting_value)
         """
-        prices = prices.sort_index()
-        weights_df = weights_df.sort_index()
 
-        # Ensure columns match (same tickers)
-        tickers = prices.columns
-        weights_df = weights_df.reindex(columns=tickers).fillna(0.0)
+        # 1) Resample prices to rebalance frequency (monthly end)
+        if rebalance_freq == "ME":
+            prices = prices.resample("ME").last()
+        else:
+            # you can extend this later for other frequencies
+            prices = prices.resample(rebalance_freq).last()
 
-        # Use only dates where we have price data
-        weights_df = weights_df.loc[weights_df.index.intersection(prices.index)]
+        # 2) Align prices and weights on common dates
+        aligned_frames, common_index = self.align_to_common_index([prices, weights_df])
+        prices_aligned, weights_aligned = aligned_frames
 
-        if weights_df.empty:
-            raise ValueError("weights_df and prices have no overlapping dates.")
+        # Ensure dates are sorted
+        prices_aligned = prices_aligned.sort_index()
+        weights_aligned = weights_aligned.sort_index()
+        common_index = prices_aligned.index
 
-        # Our rebalancing dates (when we change weights)
-        rebalance_dates = list(weights_df.index)
+        # 3) Prepare result DataFrame
+        result_cols = [
+            "port_allocation",
+            "shares_owned",
+            "port_value",
+            "snp_price",
+            "snp_value",
+            "snp_return",
+        ]
+        backtest_data = pd.DataFrame(index=common_index, columns=result_cols, dtype=object)
 
-        # Initialize
-        first_reb_date = rebalance_dates[0]
-        # Align first rebalance date to the closest price date >= first_reb_date
-        first_price_idx = prices.index.searchsorted(first_reb_date)
-        if first_price_idx == len(prices.index):
-            raise ValueError("First rebalance date is after the last price date.")
-        current_date = prices.index[first_price_idx]
+        # 4) Determine which tickers are actually in both prices and weights
+        tickers = [c for c in prices_aligned.columns if c in weights_aligned.columns]
 
-        # Initialize positions at first rebalance
-        self.generate_starting_portfolio(
-            prices_row=prices.loc[current_date],
-            weights_row=weights_df.loc[first_reb_date]
-        )
+        if "^SPX" not in prices_aligned.columns:
+            raise ValueError("Expected '^SPX' column in prices for benchmark tracking.")
 
-        portfolio_values = pd.Series(index=prices.index, dtype=float)
-        current_value = self.starting_value
+        # 5) Setup initial portfolio & SPX benchmark
+        portfolio_value = self.starting_value
+        first_date = common_index[0]
+        first_price_row = prices_aligned.loc[first_date]
 
-        # Pointer to next rebalance date
-        reb_idx = 1 if len(rebalance_dates) > 1 else None
-        next_reb_date = rebalance_dates[reb_idx] if reb_idx is not None else None
+        snp_price0 = float(first_price_row["^SPX"])
+        snp_shares = self.starting_value / snp_price0  # buy-and-hold benchmark
 
-        for date in prices.index:
-            # If we reached or passed the next rebalance date, rebalance
-            if next_reb_date is not None and date >= next_reb_date:
-                # Compute portfolio value at this date before rebalancing
-                prices_today = prices.loc[date]
-                current_value = sum(self.positions[t] * prices_today[t] for t in tickers)
+        # Initially, no holdings before first rebalance
+        shares_owned = {t: 0.0 for t in tickers}
 
-                # Get new target weights
-                w = weights_df.loc[next_reb_date].fillna(0.0)
-                if w.sum() > 0:
-                    w = w / w.sum()
+        # 6) Main backtest loop
+        for i, date in enumerate(common_index):
+            price_row = prices_aligned.loc[date]
+            weight_row = weights_aligned.loc[date]
 
-                dollar_alloc = current_value * w
-                shares = dollar_alloc / prices_today
-                self.positions = shares.to_dict()
+            # Mark-to-market the existing portfolio (after the first date)
+            if i == 0:
+                portfolio_value = float(self.starting_value)
+            else:
+                portfolio_value = float(
+                    sum(shares_owned[t] * float(price_row[t]) for t in tickers)
+                )
 
-                # Advance to next rebalance date if any
-                reb_idx = reb_idx + 1 if reb_idx is not None else None
-                if reb_idx is not None and reb_idx < len(rebalance_dates):
-                    next_reb_date = rebalance_dates[reb_idx]
-                else:
-                    next_reb_date = None  # no more rebalances
+            # Rebalance to target weights for this date
+            target_alloc = {}
+            new_shares = {}
 
-            # Mark-to-market portfolio value for this date
-            prices_today = prices.loc[date]
-            portfolio_values.loc[date] = sum(self.positions[t] * prices_today[t] for t in tickers)
-            current_value = portfolio_values.loc[date]
+            for t in tickers:
+                price = float(price_row[t])
+                w = float(weight_row[t])
 
-        self.value_history = portfolio_values
-        self.total_value = current_value
-        return portfolio_values
+                dollars = w * portfolio_value
+                target_alloc[t] = dollars
+                new_shares[t] = dollars / price if price > 0 else 0.0
 
-    @staticmethod
-    def compute_returns(portfolio_values: pd.Series) -> pd.Series:
-        """
-        Compute simple returns from a portfolio value series.
-        """
-        returns = portfolio_values.pct_change().dropna()
-        return returns
+            shares_owned = new_shares
+
+            # SPX benchmark tracking
+            snp_price = float(price_row["^SPX"])
+            snp_value = float(snp_shares * snp_price)
+            snp_return = snp_value / self.starting_value - 1.0
+
+            # Store results
+            backtest_data.at[date, "port_allocation"] = target_alloc
+            backtest_data.at[date, "shares_owned"] = new_shares
+            backtest_data.at[date, "port_value"] = float(portfolio_value)
+            backtest_data.at[date, "snp_price"] = snp_price
+            backtest_data.at[date, "snp_value"] = snp_value
+            backtest_data.at[date, "snp_return"] = snp_return
+
+        return backtest_data
 
 if __name__ == "__main__":
 
     port = Portfolio()
+    analysis = FactorAnalysis()
     json_data = port.generate_sp5mv_df("sp5mv.json")
     print(json_data)
-    tickers, common_index = port.get_price_data(["VYM", "IVW", "PDP", "^SPX", "VFLQ", "USMV"], csv_output=True)
+    tickers, common_index = port.get_price_data(["VYM", "IVW", "PDP", "^SPX"], csv_output=True)
 
-    print("tickers \n", tickers, "\n")
-    print(type(tickers))
-    print("index \n", common_index, "\n")
-    print(type(common_index))
+    weights_df = analysis.build_portfolio_weights(
+            use_vym=True,
+            use_ivw=True,
+            use_pdp=True,
+            use_spx=True,
+            use_vflq=False,
+            use_sp5mv = True,
+            floor=0.05,       
+            cash_weight=0.00  
+        )
+
+
+    prices_df = tickers[0]
+    print("prices: \n",prices_df)
+    prices_row = prices_df.iloc[0]
+    weights_row = weights_df.iloc[0]
+    # print("prices row maybe? ", prices_row)
+    # print("weights row maybe? ", weights_row)
+    
+    starting_port, shares =  port.generate_allocation(prices_row=prices_row, weights_row=weights_row)
+
+
+    # print(starting_port)
+    # print(shares)
+
+    portfolio_returns = port.backtest(prices = prices_df, weights_df = weights_df)
+    print("portfolio returns \n", portfolio_returns)
+    analysis.output_data(portfolio_returns,"port_returns.csv")
+
+
 
     # print("portfolio price data example\n")
     # print("df head: ")

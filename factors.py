@@ -7,7 +7,7 @@ import yfinance as yf
 import json
 import requests
 
-from portfolio import Portfolio
+# from portfolio import Portfolio
 
 load_dotenv()
 fred_key = os.getenv("FRED-KEY")
@@ -36,7 +36,7 @@ PDP (Momentum ETF): Switched from MTUM cause the price history did not go back b
         Cross-sectional volatility: 
         Momentum factor return:
 
-USMV(Volitility ETF):
+SP5MV(Volitility Index):
     Factors:
         Volatility (VIX): positive correlation
         Real GDP growth: negative correlation
@@ -185,7 +185,7 @@ class FactorAnalysis:
         df["IVW_allocation"] = 0.05 + 0.25 * df["IVW_score"]
         return df
 
-    def calculate_dwa(self):
+    def calculate_pdp(self):
         # --- Fetch monthly data ---
         vix   = fred.get_series("VXOCLS", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()        # volatility proxy
         m2    = fred.get_series("M2SL", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()          # liquidity supply
@@ -213,7 +213,7 @@ class FactorAnalysis:
         indpro_score = df_norm["indpro_yoy"]
         sent_score   = df_norm["sent"]
 
-        df["DWA_score"] = (
+        df["PDP_score"] = (
             0.25 * vol_score +
             0.25 * liq_score +
             0.20 * spread_score +
@@ -221,7 +221,7 @@ class FactorAnalysis:
             0.15 * sent_score
         ).clip(0, 1)
 
-        df["DWA_allocation"] = 0.05 + 0.25 * df["DWA_score"]
+        df["PDP_allocation"] = 0.05 + 0.25 * df["PDP_score"]
         return df
     
     def calculate_spx(self):
@@ -295,6 +295,42 @@ class FactorAnalysis:
 
         df["VFLQ_allocation"] = 0.05 + 0.25 * df["VFLQ_score"]
         return df
+
+    def calculate_sp5mv(self):
+
+        vix = fred.get_series("VIXCLS", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()
+        real_gdp =  fred.get_series("GDPC1", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()
+        credit_spreads =  fred.get_series("T10Y2Y", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()
+        consumer_sentiment =  fred.get_series("UMCSENT", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()
+        unemployment =  fred.get_series("UNRATE", observation_start = self.start_date, observation_end=self.end_date).resample("ME").last()
+
+        df = pd.concat({
+            "vix": vix,
+            "rgdp": real_gdp,
+            "credit_spreads": credit_spreads,
+            "consumer_sentiment": consumer_sentiment,
+            "unemployment": unemployment
+        }, axis=1).dropna()
+
+        df_norm = df.apply(self.normalize)
+
+        vix_score    = df_norm["vix"]
+        rgdp_score    = 1 - df_norm["rgdp"]
+        credit_spread_score = df_norm["credit_spreads"]
+        con_sent_score = 1- df_norm["consumer_sentiment"]
+        unemployment_score   = df_norm["unemployment"]
+
+        df["SP5MV_score"] = (
+            0.25 * vix_score +
+            0.10 * credit_spread_score +
+            0.10 * con_sent_score +
+            0.25 * rgdp_score +
+            0.30 * unemployment_score
+        ).clip(0, 1)
+
+        df["SP5MV_allocation"] = 0.05 + 0.25 * df["SP5MV_score"]
+
+        return df
     
 
     #Final allocation
@@ -302,9 +338,10 @@ class FactorAnalysis:
         self,
         use_vym=True,
         use_ivw=True,
-        use_dwa=True,
+        use_pdp=True,
         use_spx=True,
         use_vflq=True,
+        use_sp5mv = True,
         floor: float = 0.0,
         cash_weight: float = 0.0,
     ) -> pd.DataFrame:
@@ -328,18 +365,22 @@ class FactorAnalysis:
             ivw = self.calculate_ivw()
             dfs.append(ivw[["IVW_score"]])
             cols.append("IVW")
-        if use_dwa:
-            dwa = self.calculate_dwa()
-            dfs.append(dwa[["DWA_score"]])
-            cols.append("DWA")
+        if use_pdp:
+            dwa = self.calculate_pdp()
+            dfs.append(dwa[["PDP_score"]])
+            cols.append("PDP")
         if use_spx:
             spx = self.calculate_spx()
             dfs.append(spx[["SPX_score"]])
-            cols.append("SPX")
+            cols.append("^SPX")
         if use_vflq:
             vflq = self.calculate_VFLQ()
             dfs.append(vflq[["VFLQ_score"]])
             cols.append("VFLQ")
+        if use_sp5mv:
+            sp5mv = self.calculate_sp5mv()
+            dfs.append(sp5mv[["SP5MV_score"]])
+            cols.append("SP5MV")
 
         if not dfs:
             raise ValueError("No ETFs selected for portfolio weights.")
@@ -384,9 +425,10 @@ if __name__ == "__main__":
         weights_df = analysis.build_portfolio_weights(
             use_vym=True,
             use_ivw=True,
-            use_dwa=True,
+            use_pdp=True,
             use_spx=True,
             use_vflq=True,
+            use_sp5mv = True,
             floor=0.05,       
             cash_weight=0.00  
         )
